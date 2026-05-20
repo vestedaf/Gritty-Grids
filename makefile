@@ -32,7 +32,7 @@ include $(DEP_FILE)
 
 # Rule for building the firmware update file
 wav:  $(TARGET_BIN)
-	python avr_audio_bootloader/fsk/encoder.py \
+	python3 avr_audio_bootloader/fsk/encoder.py \
 		-s 40000 -b 16 -n 8 -z 4 -p 128 -g 128 -k 10 \
 		$(TARGET_BIN)
 

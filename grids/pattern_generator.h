@@ -186,6 +186,9 @@ class PatternGenerator {
   static void set_gate_mode(bool gate_mode) {
     options_.gate_mode = gate_mode;
   }
+
+  static uint8_t bank() { return bank_; }
+  static void set_bank(uint8_t b) { bank_ = (b < 3) ? b : 0; }
   
   static inline void IncrementPulseCounter() {
     ++pulse_duration_counter_;
@@ -256,6 +259,7 @@ class PatternGenerator {
   static uint8_t factory_testing_;
   
   static PatternGeneratorSettings settings_;
+  static uint8_t bank_;
   
   DISALLOW_COPY_AND_ASSIGN(PatternGenerator);
 };

@@ -61,17 +61,36 @@ uint8_t PatternGenerator::part_perturbation_[kNumParts];
 PatternGeneratorSettings PatternGenerator::settings_;
 
 /* static */
+uint8_t PatternGenerator::bank_;
+
+/* static */
 uint8_t PatternGenerator::factory_testing_;
 
 /* extern */
 PatternGenerator pattern_generator;
 
-static const prog_uint8_t* drum_map[5][5] = {
-  { node_10, node_8, node_0, node_9, node_11 },
-  { node_15, node_7, node_13, node_12, node_6 },
-  { node_18, node_14, node_4, node_5, node_3 },
-  { node_23, node_16, node_21, node_1, node_2 },
-  { node_24, node_19, node_17, node_20, node_22 },
+static const prog_uint8_t* drum_map[3][5][5] = {
+  {  // Bank 0: OG Grids
+    { node_10, node_8, node_0, node_9, node_11 },
+    { node_15, node_7, node_13, node_12, node_6 },
+    { node_18, node_14, node_4, node_5, node_3 },
+    { node_23, node_16, node_21, node_1, node_2 },
+    { node_24, node_19, node_17, node_20, node_22 },
+  },
+  {  // Bank 1: Electronic
+    { node_35, node_33, node_25, node_34, node_36 },
+    { node_40, node_32, node_38, node_37, node_31 },
+    { node_43, node_39, node_29, node_30, node_28 },
+    { node_48, node_41, node_46, node_26, node_27 },
+    { node_49, node_44, node_42, node_45, node_47 },
+  },
+  {  // Bank 2: Breakbeat/Hip-Hop
+    { node_60, node_58, node_50, node_59, node_61 },
+    { node_65, node_57, node_63, node_62, node_56 },
+    { node_68, node_64, node_54, node_55, node_53 },
+    { node_73, node_66, node_71, node_51, node_52 },
+    { node_74, node_69, node_67, node_70, node_72 },
+  },
 };
 
 /* static */
@@ -82,10 +101,10 @@ uint8_t PatternGenerator::ReadDrumMap(
     uint8_t y) {
   uint8_t i = x >> 6;
   uint8_t j = y >> 6;
-  const prog_uint8_t* a_map = drum_map[i][j];
-  const prog_uint8_t* b_map = drum_map[i + 1][j];
-  const prog_uint8_t* c_map = drum_map[i][j + 1];
-  const prog_uint8_t* d_map = drum_map[i + 1][j + 1];
+  const prog_uint8_t* a_map = drum_map[bank_][i][j];
+  const prog_uint8_t* b_map = drum_map[bank_][i + 1][j];
+  const prog_uint8_t* c_map = drum_map[bank_][i][j + 1];
+  const prog_uint8_t* d_map = drum_map[bank_][i + 1][j + 1];
   uint8_t offset = (instrument * kStepsPerPattern) + step;
   uint8_t a = pgm_read_byte(a_map + offset);
   uint8_t b = pgm_read_byte(b_map + offset);
@@ -175,6 +194,8 @@ void PatternGenerator::EvaluateEuclidean() {
 void PatternGenerator::LoadSettings() {
   options_.unpack(eeprom_read_byte(NULL));
   factory_testing_ = eeprom_read_byte((uint8_t*)(1)) + 1;
+  uint8_t b = eeprom_read_byte((uint8_t*)(2));
+  bank_ = (b < 3) ? b : 0;
 }
 
 /* static */
@@ -185,6 +206,7 @@ void PatternGenerator::SaveSettings() {
     factory_testing_ = 5;
   }
   eeprom_write_byte((uint8_t*)(1), factory_testing_);
+  eeprom_write_byte((uint8_t*)(2), bank_);
 }
 
 /* static */

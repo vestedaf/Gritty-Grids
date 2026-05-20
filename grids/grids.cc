@@ -74,7 +74,8 @@ enum Parameter
   PARAMETER_SWING,
   PARAMETER_GATE_MODE,
   PARAMETER_OUTPUT_MODE,
-  PARAMETER_CLOCK_OUTPUT
+  PARAMETER_CLOCK_OUTPUT,
+  PARAMETER_BANK
 };
 
 uint32_t tap_duration = 0;
@@ -91,6 +92,14 @@ uint8_t clocked_by_midi = 0; // 1 = MIDI Clock advances Grids, 2 = MIDI Stop rec
 uint8_t mute = 0;            // 1 = drum and accent outputs are muted
 uint8_t external_clock = 0;  // 1 = Grids is in external clock mode (clock knob = min,
                              // accept pulses on clock input or by midi clock messages)
+
+// Accent CV soft-PWM state: hold levels between triggers rather than short pulses.
+// In drums mode (no output clock): accented channels → 5V, normal triggers → ~3V (PWM),
+// no trigger → 0V. Uses 800 Hz soft-PWM (8 kHz ISR / 10 ticks), 60 % duty for ~3V.
+static uint8_t accent_cv_high = 0;   // bits 0-2: channels latched at 5V (accented)
+static uint8_t accent_cv_normal = 0; // bits 0-2: channels latched at ~3V (normal trigger)
+static uint8_t accent_pwm_counter = 0;
+static uint8_t sr_base_state = 0;    // shift register state with accent bits stripped
 
 inline void UpdateLeds()
 {
@@ -168,6 +177,17 @@ inline void UpdateLeds()
       {
         pattern |= LED_ALL;
       }
+      break;
+
+    case PARAMETER_BANK:
+      if (pattern_generator.bank() == 0) {
+        pattern |= LED_BD;
+      } else if (pattern_generator.bank() == 1) {
+        pattern |= LED_BD | LED_SD;
+      } else {
+        pattern |= LED_BD | LED_SD | LED_HH;
+      }
+      break;
     }
   }
   leds.Write(pattern);
@@ -176,22 +196,24 @@ inline void UpdateLeds()
 inline void BufferMidiMessages(uint8_t state)
 {
   if (state & 0x01)
-  { // BD
-    grids::MidiDevice::BufferNote(MIDI_CHANNEL, BD_NOTE, 0x7f);
+  { // BD: velocity 127 if accented (bit 3), else 99
+    uint8_t vel = (state & 0x08) ? 127 : 99;
+    grids::MidiDevice::BufferNote(MIDI_CHANNEL, BD_NOTE, vel);
   }
   if (state & 0x02)
-  { // SD
-    grids::MidiDevice::BufferNote(MIDI_CHANNEL, SD_NOTE, 0x7f);
+  { // SD: velocity 127 if accented (bit 4), else 99
+    uint8_t vel = (state & 0x10) ? 127 : 99;
+    grids::MidiDevice::BufferNote(MIDI_CHANNEL, SD_NOTE, vel);
   }
   if (state & 0x04)
-  { // HH
+  { // HH: open hi-hat note + vel 127 if accented (bit 5), closed + vel 99 otherwise
     if (state & 0x20)
     {
-      grids::MidiDevice::BufferNote(MIDI_CHANNEL, HH_ACCENT_NOTE, 0x7f);
+      grids::MidiDevice::BufferNote(MIDI_CHANNEL, HH_ACCENT_NOTE, 127);
     }
     else
     {
-      grids::MidiDevice::BufferNote(MIDI_CHANNEL, HH_NOTE, 0x7f);
+      grids::MidiDevice::BufferNote(MIDI_CHANNEL, HH_NOTE, 99);
     }
   }
 }
@@ -220,7 +242,29 @@ inline void UpdateShiftRegister()
   if (state != previous_state)
   {
     previous_state = state;
-    shift_register.Write(state);
+
+    // In drums mode without output clock, accent bits (3-5) are per-channel velocity CVs.
+    // Track the held accent state and strip accent bits from the base SR value so the
+    // ISR can re-apply them each tick via soft-PWM (accented=5V, normal=~3V).
+    bool drums_accent_mode = (pattern_generator.output_mode() == OUTPUT_MODE_DRUMS &&
+                              !pattern_generator.output_clock());
+    if (drums_accent_mode)
+    {
+      uint8_t trigger_bits = state & 0x07;
+      uint8_t accent_bits  = (state >> 3) & 0x07;
+      uint8_t normal_bits  = trigger_bits & ~accent_bits;
+      // Update per-channel held state only for channels that just fired a trigger.
+      // Channels that did not fire retain their previous level.
+      accent_cv_high   = (accent_cv_high   & ~trigger_bits) | accent_bits;
+      accent_cv_normal = (accent_cv_normal & ~trigger_bits) | normal_bits;
+      sr_base_state = state & ~0x38; // accent bits handled by soft-PWM
+    }
+    else
+    {
+      sr_base_state = state;
+      accent_cv_high   = 0;
+      accent_cv_normal = 0;
+    }
 
     // Buffer MIDI messages
     BufferMidiMessages(state);
@@ -485,6 +529,26 @@ ISR(TIMER2_COMPA_vect, ISR_NOBLOCK)
   pattern_generator.IncrementPulseCounter();
   UpdateShiftRegister();
   UpdateLeds();
+
+  // When muted, suppress accent CV levels.
+  if (mute)
+  {
+    accent_cv_high   = 0;
+    accent_cv_normal = 0;
+  }
+
+  // Write shift register every tick: base trigger/clock/random bits plus
+  // soft-PWM accent bits (accented=always HIGH, normal=60 % duty cycle →~3V).
+  uint8_t pwm_accent = accent_cv_high;
+  if (accent_pwm_counter < 6)
+  {
+    pwm_accent |= accent_cv_normal;
+  }
+  if (++accent_pwm_counter >= 10)
+  {
+    accent_pwm_counter = 0;
+  }
+  shift_register.Write(sr_base_state | (pwm_accent << 3));
 }
 
 static int16_t pot_values[8];
@@ -575,6 +639,15 @@ void ScanPots()
         case ADC_CHANNEL_RANDOMNESS_CV:
           parameter = PARAMETER_CLOCK_OUTPUT;
           pattern_generator.set_output_clock(!(value & 0x80));
+          break;
+
+        case ADC_CHANNEL_TEMPO:
+          parameter = PARAMETER_BANK;
+          {
+            uint8_t b = value / 85;
+            if (b > 2) b = 2;
+            pattern_generator.set_bank(b);
+          }
           break;
         }
       }
