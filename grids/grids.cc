@@ -39,6 +39,7 @@
 // Added MIDI out drum triggers on channel 10
 
 #include <avr/eeprom.h>
+#include <avr/pgmspace.h>
 
 #include "avrlib/adc.h"
 #include "avrlib/boot.h"
@@ -50,6 +51,10 @@
 #include "grids/pattern_generator.h"
 #include "grids/midi.h"
 // #include "avrlib/software_serial.h"
+
+// Bootloader entry point at 0x7000 (28KB)
+typedef void (*BootloaderPtr)(void);
+const BootloaderPtr bootloader_start = (BootloaderPtr)0x7000;
 
 using namespace avrlib;
 using namespace grids;
@@ -447,6 +452,11 @@ inline void HandleTapButton()
   {
     if (parameter == PARAMETER_NONE)
     {
+      // Check for bootloader entry: button pressed while reset is held low
+      if (!reset_input.Read()) {
+        EnterBootloader();
+      }
+      
       if (clocked_by_midi)
       { // in clocked_by_midi mode, button toggles mute state
         if (mute)

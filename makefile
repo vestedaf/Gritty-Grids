@@ -21,6 +21,11 @@ RESOURCES      = grids/resources
 SYSEX_FLAGS    = --page_size=64 --device_id=9
 EXTRA_DEFINES  = -DDISABLE_DEFAULT_UART_RX_ISR
 
+# Bootloader configuration - reserve top 4KB (2048 words) for bootloader
+BOOTLOADER_SIZE = 4096
+BOOTLOADER_START = 0x7000
+LDFLAGS        = -Wl,--section-start=.text=0x0000
+
 LFUSE          = ff
 HFUSE          = d8
 EFUSE          = 05
